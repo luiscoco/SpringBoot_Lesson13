@@ -1,5 +1,9 @@
 # SpringBoot_Lesson13
 
+**IMPORTANT NOTE**:
+
+Copy and paste the Lesson 10 source code and open it with VSCode. Then select Codex agent in VSCode and execute the following prompt:
+
 ## Propmt for the Code Agent (Codex, Gemini Code Assistant or Copilot)
 
 **Context**
