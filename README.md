@@ -1,91 +1,199 @@
-# SpringBoot_Lesson9.2
+# SpringBoot_Lesson13
 
 ## Propmt for the Code Agent (Codex, Gemini Code Assistant or Copilot)
 
-**Context**:
+**Context**
 
-I am learning to write integration tests for a Spring Boot REST API using Spring Boot 3.3 and Java 17.
+Set up a complete local observability stack for a Spring Boot 3.3 application named task-service using Docker Compose.
 
-I want to test the controller layer and HTTP responses using MockMvc, while mocking the service layer.
+Target OS may be Windows; prefer healthchecks that avoid fragile quoting.
 
-The project has Basic auth enabled: endpoint pattern /tasks/** requires role USER, and there is an in-memory user user with password password.
+**Task**
 
-**Task**:
+**Generate**:
 
-Generate a JUnit 5 integration test for a TaskController class.
+docker-compose.yml with pinned images, healthchecks, and Grafana provisioning mounts
 
-**Known code in the app**:
+prometheus.yml scraping task-service
 
-Controller: com.example.demo.controller.TaskController
+Grafana provisioning files (datasource + dashboard provider) and a minimal Spring Boot dashboard JSON
 
-GET /tasks/{id} returns a TaskDto
+A Dockerfile for a Spring Boot fat JAR (includes wget for healthchecks)
 
-GET /tasks supports optional completed query param
+An application.properties snippet enabling actuator metrics and OTLP tracing to Jaeger
 
-POST /tasks accepts a Task and returns a TaskDto (201 Created)
+Ensure Spring app dependencies include Actuator, Prometheus registry, and Micrometer OTLP tracing; and allow unauthenticated access to /actuator/** if Spring Security is enabled
 
-Service: com.example.demo.service.TaskService
+**Constraints**
 
-Methods include TaskDto getTaskById(long id)
+Service name must be task-service everywhere (Compose, Prometheus target, app name).
 
-DTO: com.example.demo.dto.TaskDto (record: TaskDto(Long id, String description, boolean completed))
+Build task-service from a local Dockerfile in . and map 8080 (line 8080).
 
-Security: Basic auth required for /tasks/**; in-memory user user / password.
+All services share a single network observability.
 
-**Constraints**:
+**Pin images:**
 
-Use @SpringBootTest to load the application context.
+Prometheus prom/prometheus:v2.53.0
 
-Use @AutoConfigureMockMvc to test the web layer without a real HTTP server.
+Grafana grafana/grafana:10.4.6
 
-Mock TaskService with @MockBean.
+Jaeger all-in-one jaegertracing/all-in-one:1.74.0
 
-Use MockMvc to perform the request.
+**Expose ports:**
 
-Include a Basic auth header for the request (user:password).
+App 8080, Prometheus 9090, Grafana 3000
 
-**Steps**:
+Jaeger UI 16686, OTLP gRPC 4317, OTLP HTTP 4318
 
-Create src/test/java/com/example/demo/controller/TaskControllerTest.java with package com.example.demo.controller.
+**Healthchecks and restart policy:**
 
-Annotate the test class with @SpringBootTest and @AutoConfigureMockMvc.
+restart: unless-stopped for all services
 
-Inject MockMvc and declare @MockBean TaskService taskService.
+task-service healthcheck: GET http://localhost:8080/actuator/health and check body contains UP (use wget). Use start_period: 60s and retries: 12.
 
-Stub taskService.getTaskById(1L) to return new TaskDto(1L, "Test Task", false).
+prometheus healthcheck: http://localhost:9090/-/ready
 
-Perform a GET request to /tasks/1 with Basic auth for user:password.
+grafana healthcheck: http://localhost:3000/login
 
-Assert HTTP status 200 (OK).
+jaeger healthcheck: http://localhost:16686
 
-Assert the response is JSON and matches the DTO: id = 1, description = "Test Task", completed = false (e.g., using jsonPath).
+Use depends_on with condition: service_healthy (Prometheus waits for task-service; Grafana waits for Prometheus).
 
-Include commands to run only this test using Maven or Gradle.
+**Grafana provisioning:**
 
-**Acceptance Criteria**:
+Mount ./grafana/provisioning/datasources -> /etc/grafana/provisioning/datasources
 
-The test class is annotated with @SpringBootTest and @AutoConfigureMockMvc.
+Mount ./grafana/provisioning/dashboards -> /etc/grafana/provisioning/dashboards
 
-TaskService is mocked with @MockBean.
+Mount ./grafana/dashboards -> /var/lib/grafana/dashboards
 
-The test performs a request using MockMvc and includes Basic auth.
+**Prometheus config:**
 
-The test verifies HTTP 200 OK.
+global.scrape_interval: 15s
 
-The test verifies the JSON response body fields.
+Job spring-boot-app, metrics_path: /actuator/prometheus
 
-The test compiles and passes.
+Static target task-service (line 8080)
 
-**Deliverables**:
+**Compose specifics:**
 
-Full code for TaskControllerTest.java.
+Do not include the version key (Compose v2 ignores it).
 
-Commands to run the test.
+Mount ./prometheus.yml -> /etc/prometheus/prometheus.yml:ro
 
-**Run Only This Test**:
+**Dockerfile:**
 
-Maven: mvn test -Dtest=com.example.demo.controller.TaskControllerTest
+Base eclipse-temurin:21-jre
 
-Gradle (Windows): gradlew.bat test --tests "com.example.demo.controller.TaskControllerTest"
+Install wget (for healthcheck)
 
-Gradle (Unix/macOS): ./gradlew test --tests "com.example.demo.controller.TaskControllerTest"
+ARG JAR_FILE=target/*.jar, COPY to /app/app.jar
+
+EXPOSE 8080 and ENTRYPOINT ["java","-jar","/app/app.jar"]
+
+**App config assumptions:**
+
+Actuator and Prometheus metrics enabled and exposed
+
+Micrometer Tracing (OTLP) configured to Jaeger OTLP HTTP at http://jaeger:4318/v1/traces
+
+Sampling probability set to 1.0
+
+If Spring Security is present, permit /actuator/** without authentication
+
+**Steps**
+
+**Create prometheus.yml:**
+
+scrape_interval: 15s
+
+Job spring-boot-app
+
+metrics_path: /actuator/prometheus
+
+Targets ["task-service:8080"]
+
+**Create docker-compose.yml:**
+
+Services: task-service, prometheus, grafana, jaeger
+
+Pin images as specified
+
+restart: unless-stopped
+
+Healthchecks: task-service uses wget + grep -q UP, start_period 60s, retries 12; Prometheus/Grafana/Jaeger as above
+
+depends_on with health conditions
+
+Mount prometheus.yml and Grafana provisioning/dashboards
+
+Expose ports as specified and place all services on observability network
+
+**Create Grafana provisioning:**
+
+grafana/provisioning/datasources/datasource.yml pointing to http://prometheus:9090
+
+grafana/provisioning/dashboards/dashboard.yml loading from /var/lib/grafana/dashboards
+
+grafana/dashboards/spring-boot.json with panels: uptime, RPS by uri/status, avg latency, p95 latency, JVM memory, heap usage %
+
+Create Dockerfile for Spring Boot fat JAR as specified (including wget).
+
+Provide application.properties snippet enabling actuator and tracing.
+
+Ensure the app has the required dependencies; if missing, add to pom.xml:
+
+org.springframework.boot:spring-boot-starter-actuator
+
+io.micrometer:micrometer-registry-prometheus
+
+io.micrometer:micrometer-tracing-bridge-otel
+
+io.opentelemetry:opentelemetry-exporter-otlp
+
+If Spring Security is configured, update security to permit /actuator/** anonymously.
+
+**Deliverables**
+
+docker-compose.yml
+
+prometheus.yml
+
+grafana/provisioning/datasources/datasource.yml
+
+grafana/provisioning/dashboards/dashboard.yml
+
+grafana/dashboards/spring-boot.json
+
+Dockerfile
+
+application.properties snippet:
+
+spring.application.name=task-service
+
+management.endpoints.web.exposure.include=health,info,prometheus
+
+management.endpoint.prometheus.enabled=true
+
+management.metrics.export.prometheus.enabled=true
+
+management.tracing.enabled=true
+
+management.tracing.sampling.probability=1.0
+
+management.otlp.tracing.endpoint=http://jaeger:4318/v1/traces
+
+**Run Notes**
+
+Build the JAR first: mvn -q -DskipTests package
+
+Start: docker compose up --build
+
+Prometheus quick queries: up, process_uptime_seconds{job="spring-boot-app"}, http_server_requests_seconds_count{job="spring-boot-app"}
+
+
+
+
+
+
